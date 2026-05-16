@@ -4,6 +4,8 @@
 
 An unofficial Home Assistant custom component for Plugit EV charging network. Allows you to monitor and control your Plugit charger directly from Home Assistant.
 
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
+
 ## Features
 
 - Start and stop charging (switch)
@@ -11,6 +13,9 @@ An unofficial Home Assistant custom component for Plugit EV charging network. Al
 - Current per phase (L1, L2, L3)
 - Session energy (kWh)
 - Charging state (ongoing / idle)
+- Monthly statistics (energy, sessions, CO2 savings, charging time)
+- Yearly statistics (energy, total refund)
+- Leasing refund tracking (€ and €/kWh)
 - Automatic authentication and token renewal
 - Auto-discovery of charger details on setup
 
@@ -20,11 +25,20 @@ An unofficial Home Assistant custom component for Plugit EV charging network. Al
 - Plugit user account
 - A charger connected to the Plugit network
 
-## Installation
+## Installation via HACS (recommended)
 
-### 1. Copy files
+1. Open HACS in Home Assistant
+2. Click the three dots (⋮) in the top right corner
+3. Select **Custom repositories**
+4. Add this URL: `https://github.com/mattilehtonen-cyber/ha-plugit`
+5. Select category: **Integration**
+6. Click **Add**
+7. Search for **Plugit** in HACS and click **Download**
+8. Restart Home Assistant
 
-Copy the `plugit` folder to your Home Assistant `custom_components` directory:
+## Manual Installation
+
+Copy the `custom_components/plugit` folder to your Home Assistant `custom_components` directory:
 
 ```
 /config/custom_components/plugit/
@@ -37,16 +51,14 @@ Copy the `plugit` folder to your Home Assistant `custom_components` directory:
 ├── sensor.py
 ├── strings.json
 ├── switch.py
-└── websocket.py
+├── websocket.py
+└── translations/
+    └── en.json
 ```
 
-### 2. Restart Home Assistant
+Restart Home Assistant after copying the files.
 
-```
-Settings → System → Restart
-```
-
-### 3. Add integration
+## Setup
 
 1. Go to **Settings → Integrations → Add Integration**
 2. Search for **Plugit**
@@ -62,9 +74,17 @@ Settings → System → Restart
 | Plugit Current L1 | Sensor | Phase L1 current (A) |
 | Plugit Current L2 | Sensor | Phase L2 current (A) |
 | Plugit Current L3 | Sensor | Phase L3 current (A) |
-| Plugit Session Energy | Sensor | Session energy (kWh) |
+| Plugit Session Energy | Sensor | Current session energy (kWh) |
 | Plugit State | Sensor | Charging state (ongoing/idle) |
 | Plugit Charger Status | Sensor | OCPP status via WebSocket |
+| Plugit Monthly Energy | Sensor | Energy this month (kWh) |
+| Plugit Monthly Sessions | Sensor | Charging sessions this month |
+| Plugit Monthly CO2 Savings | Sensor | CO2 savings this month (kg) |
+| Plugit Monthly Charging Time | Sensor | Total charging time this month (h) |
+| Plugit Monthly Refund | Sensor | Leasing refund this month (€) |
+| Plugit Refund Price | Sensor | Current refund rate (€/kWh) |
+| Plugit Yearly Energy | Sensor | Energy this year (kWh) |
+| Plugit Yearly Refund | Sensor | Total leasing refund this year (€) |
 
 ## Automation Examples
 
@@ -107,7 +127,7 @@ This integration uses the Plugit Cloud API discovered through reverse engineerin
 - Data: `app-gw.plugitcloud.com`
 - WebSocket: `socket.plugitcloud.com` (Socket.IO)
 
-Data is refreshed every 30 seconds via REST API polling. A WebSocket connection provides real-time charger status updates.
+Data is refreshed every 30 seconds via REST API polling. Monthly and yearly statistics are refreshed every hour. A WebSocket connection provides real-time charger status updates.
 
 ## Known Limitations
 
@@ -129,6 +149,10 @@ Data is refreshed every 30 seconds via REST API polling. A WebSocket connection 
 **Sensors show Unknown**
 - This is normal when no charging session is active
 - Start a charging session and wait up to 30 seconds for data to appear
+
+**Monthly/yearly stats not updating**
+- Statistics update once per hour
+- Wait an hour or restart Home Assistant
 
 ## License
 
