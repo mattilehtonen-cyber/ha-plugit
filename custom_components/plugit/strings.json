@@ -1,0 +1,22 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Plugit EV Charger",
+        "description": "Enter your Plugit account credentials. Charger details will be discovered automatically.",
+        "data": {
+          "email": "Email",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid email or password",
+      "cannot_connect": "Cannot connect to Plugit",
+      "no_chargers": "No chargers found on this account"
+    },
+    "abort": {
+      "already_configured": "Plugit is already configured"
+    }
+  }
+}
