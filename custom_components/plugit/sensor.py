@@ -148,9 +148,9 @@ class PlugitCurrentL3Sensor(PlugitBaseSensor):
 
 class PlugitSessionEnergySensor(PlugitBaseSensor):
     _attr_name = "Plugit Session Energy"
-    _attr_device_class = SensorDeviceClass.ENERGY
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_icon = "mdi:lightning-bolt"
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry, "session_energy")
@@ -199,6 +199,12 @@ class PlugitMonthlyEnergySensor(PlugitBaseSensor):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry, "monthly_energy")
+
+    @property
+    def last_reset(self):
+        from datetime import datetime
+        now = datetime.now()
+        return datetime(now.year, now.month, 1)
 
     @property
     def native_value(self):
@@ -316,6 +322,12 @@ class PlugitYearlyEnergySensor(PlugitBaseSensor):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry, "yearly_energy")
+
+    @property
+    def last_reset(self):
+        from datetime import datetime
+        now = datetime.now()
+        return datetime(now.year, 1, 1)
 
     @property
     def native_value(self):
