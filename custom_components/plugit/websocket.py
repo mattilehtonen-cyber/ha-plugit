@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Callable
 
@@ -10,6 +11,13 @@ import aiohttp
 _LOGGER = logging.getLogger(__name__)
 
 SOCKET_URL = "wss://socket.plugitcloud.com/socket.io/?EIO=3&transport=websocket"
+API_BASE = "https://app-gw.plugitcloud.com"
+
+REGISTER_ENDPOINTS = [
+    "/transactions/socket",
+    "/hubject/transactions/socket",
+    "/transaction-price/socket",
+]
 
 
 class PlugitWebSocket:
@@ -20,33 +28,37 @@ class PlugitWebSocket:
         session: aiohttp.ClientSession,
         access_token: str,
         charge_box_id: str,
+        charge_point_id: str,
         on_status: Callable[[str], None],
-        on_meter: Callable[[dict], None],
+        on_transaction_update: Callable[[dict], None],
+        on_token_expiring: Callable[[], None] | None = None,
     ) -> None:
         self._session = session
         self._access_token = access_token
         self._charge_box_id = charge_box_id
+        self._charge_point_id = charge_point_id
         self._on_status = on_status
-        self._on_meter = on_meter
+        self._on_transaction_update = on_transaction_update
+        self._on_token_expiring = on_token_expiring
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._task: asyncio.Task | None = None
         self._running = False
 
     async def start(self) -> None:
-        """Start WebSocket connection."""
         self._running = True
         self._task = asyncio.create_task(self._run())
 
     async def stop(self) -> None:
-        """Stop WebSocket connection."""
         self._running = False
         if self._ws:
             await self._ws.close()
         if self._task:
             self._task.cancel()
 
+    def update_token(self, new_token: str) -> None:
+        self._access_token = new_token
+
     async def _run(self) -> None:
-        """Main WebSocket loop with reconnect."""
         while self._running:
             try:
                 await self._connect()
@@ -54,16 +66,52 @@ class PlugitWebSocket:
                 _LOGGER.warning("Plugit WebSocket error: %s, reconnecting in 30s", err)
                 await asyncio.sleep(30)
 
-    async def _connect(self) -> None:
-        """Connect and handle messages."""
-        _LOGGER.debug("Connecting to Plugit WebSocket")
-        async with self._session.ws_connect(
-            SOCKET_URL,
-            headers={"user-agent": "Dart/3.8 (dart:io)"},
-        ) as ws:
-            self._ws = ws
-            _LOGGER.debug("Plugit WebSocket connected")
+    async def _register_socket(self, socket_id: str) -> None:
+        """Register this socket connection to all Plugit backend channels."""
+        headers = {"authorization": self._access_token}
 
+        endpoints = list(REGISTER_ENDPOINTS)
+        # chargePointId (ei chargeBoxId) tähän endpointtiin - antaa StatusNotification-viestit
+        if self._charge_point_id:
+            endpoints.append(f"/charge-point/{self._charge_point_id}/socket")
+
+        for ep in endpoints:
+            try:
+                async with self._session.post(
+                    f"{API_BASE}{ep}",
+                    headers=headers,
+                    json={"socketId": socket_id},
+                ) as resp:
+                    _LOGGER.debug("Registered %s -> %s", ep, resp.status)
+            except Exception as err:
+                _LOGGER.debug("Failed to register %s: %s", ep, err)
+
+    async def _connect(self) -> None:
+        _LOGGER.debug("Connecting to Plugit WebSocket")
+        async with self._session.ws_connect(SOCKET_URL) as ws:
+            self._ws = ws
+            _LOGGER.info("Plugit WebSocket connected")
+
+            # 1. Lue handshake (0{sid,...})
+            first = await ws.receive()
+            if first.type != aiohttp.WSMsgType.TEXT:
+                return
+            handshake = json.loads(first.data[1:])
+            socket_id = handshake.get("sid")
+            _LOGGER.debug("Got socketId: %s", socket_id)
+
+            # 2. Lue ja skippaa "40" (namespace connect)
+            second = await ws.receive()
+            if second.type != aiohttp.WSMsgType.TEXT:
+                return
+            _LOGGER.debug("Namespace connected: %s", second.data)
+
+            # 3. Rekisteröi socket kaikkiin kanaviin VASTA nyt
+            if socket_id:
+                await self._register_socket(socket_id)
+                _LOGGER.info("Plugit WebSocket registered, listening for data")
+
+            # 4. Kuuntele viestejä
             async for msg in ws:
                 if msg.type == aiohttp.WSMsgType.TEXT:
                     await self._handle_message(msg.data)
@@ -71,36 +119,21 @@ class PlugitWebSocket:
                     _LOGGER.error("WebSocket error: %s", ws.exception())
                     break
                 elif msg.type == aiohttp.WSMsgType.CLOSED:
+                    _LOGGER.debug("WebSocket closed")
                     break
 
     async def _handle_message(self, raw: str) -> None:
-        """Handle Socket.IO message."""
-        # Socket.IO protocol:
-        # "0{...}" = connect handshake
-        # "40" = connected to namespace
-        # "2" = ping
-        # "3" = pong
-        # "42[...]" = event message
-
+        # Ping → pong
         if raw == "2":
-            # Ping — respond with pong
             if self._ws:
                 await self._ws.send_str("3")
             return
 
-        if raw.startswith("0"):
-            # Handshake received — subscribe to charge box
-            _LOGGER.debug("Socket.IO handshake received")
-            await self._subscribe()
-            return
-
+        # Event message
         if raw.startswith("42"):
-            # Event message
-            import json
             try:
                 payload = json.loads(raw[2:])
                 if isinstance(payload, list) and len(payload) == 2:
-                    token = payload[0]
                     data = payload[1]
 
                     if not isinstance(data, dict):
@@ -113,26 +146,24 @@ class PlugitWebSocket:
                         _LOGGER.debug("Plugit status: %s", status)
                         self._on_status(status)
 
-                    elif msg_type == "MeterValues":
-                        meter_data = data.get("data", {})
-                        _LOGGER.debug("Plugit meter values: %s", meter_data)
-                        self._on_meter(meter_data)
-
                     elif msg_type == "Alert":
-                        # Token expiring warning — re-authenticate would be needed
-                        _LOGGER.debug("Plugit socket alert: %s", data.get("message"))
+                        message = data.get("message", "")
+                        _LOGGER.debug("Plugit alert: %s", message)
+                        if "expiring" in message.lower() and self._on_token_expiring:
+                            self._on_token_expiring()
+
+                    elif msg_type == "StartTransaction":
+                        _LOGGER.debug("StartTransaction: meterStart=%s", data.get("data", {}).get("meterStart"))
+
+                    elif msg_type == "StopTransaction":
+                        _LOGGER.debug("StopTransaction received")
+
+                    elif msg_type is None and "latestMeterValues" in data:
+                        _LOGGER.debug("Transaction update received via WebSocket")
+                        self._on_transaction_update(data)
+
+                    else:
+                        _LOGGER.debug("Unhandled WS message type: %s", msg_type)
 
             except (json.JSONDecodeError, IndexError) as err:
                 _LOGGER.debug("Could not parse WebSocket message: %s", err)
-
-    async def _subscribe(self) -> None:
-        """Subscribe to charge box events."""
-        if not self._ws:
-            return
-        # Socket.IO subscribe format: 42["token", data]
-        import json
-        msg = json.dumps([self._access_token, {
-            "chargeBoxId": self._charge_box_id,
-        }])
-        await self._ws.send_str(f"42{msg}")
-        _LOGGER.debug("Subscribed to Plugit WebSocket for chargeBoxId: %s", self._charge_box_id)

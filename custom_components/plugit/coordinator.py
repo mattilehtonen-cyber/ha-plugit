@@ -1,4 +1,4 @@
-"""Plugit data coordinator with adaptive polling."""
+"""Plugit data coordinator with WebSocket real-time updates."""
 from __future__ import annotations
 
 from datetime import timedelta
@@ -11,21 +11,18 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import PlugitApi, PlugitApiError
-from .const import DOMAIN, UPDATE_INTERVAL, STATS_UPDATE_INTERVAL, CONF_EMAIL, CONF_PASSWORD, CONF_CHARGE_BOX_ID
+from .const import DOMAIN, UPDATE_INTERVAL, STATS_UPDATE_INTERVAL, CONF_EMAIL, CONF_PASSWORD, CONF_CHARGE_BOX_ID, CONF_CHARGE_POINT_ID
 from .websocket import PlugitWebSocket
 
 _LOGGER = logging.getLogger(__name__)
 
-# Polling intervals
-INTERVAL_ACTIVE = timedelta(seconds=30)    # Charging or car connected
-INTERVAL_IDLE = timedelta(minutes=60)      # No car connected
-
-# Charger statuses that indicate active/connected state
+INTERVAL_ACTIVE = timedelta(seconds=30)
+INTERVAL_IDLE = timedelta(minutes=60)
 ACTIVE_STATUSES = {"Preparing", "Charging", "Finishing", "SuspendedEV", "SuspendedEVSE"}
 
 
 class PlugitCoordinator(DataUpdateCoordinator):
-    """Plugit data coordinator with adaptive polling."""
+    """Plugit data coordinator with WebSocket real-time updates."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         super().__init__(
@@ -43,6 +40,7 @@ class PlugitCoordinator(DataUpdateCoordinator):
         )
         self._ws: PlugitWebSocket | None = None
         self._charger_status: str = "Unknown"
+        self._ws_transaction: dict | None = None  # WebSocket transaction data
         self._monthly_stats: dict | None = None
         self._yearly_stats: list = []
         self._leasing_refunds: list = []
@@ -50,11 +48,7 @@ class PlugitCoordinator(DataUpdateCoordinator):
 
     def _update_poll_interval(self) -> None:
         """Adjust polling interval based on charger status."""
-        if self._charger_status in ACTIVE_STATUSES:
-            new_interval = INTERVAL_ACTIVE
-        else:
-            new_interval = INTERVAL_IDLE
-
+        new_interval = INTERVAL_ACTIVE if self._charger_status in ACTIVE_STATUSES else INTERVAL_IDLE
         if self.update_interval != new_interval:
             _LOGGER.debug("Plugit polling interval changed to %s", new_interval)
             self.update_interval = new_interval
@@ -62,7 +56,8 @@ class PlugitCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self) -> dict:
         """Fetch data from Plugit API."""
         try:
-            transaction = await self.api.get_active_transaction()
+            # Hae REST-data — käytetään jos WebSocket-data puuttuu
+            rest_transaction = await self.api.get_active_transaction()
 
             if self._ws is None and self.api._access_token:
                 await self._start_websocket()
@@ -75,12 +70,16 @@ class PlugitCoordinator(DataUpdateCoordinator):
             if not self._monthly_stats:
                 await self._update_stats()
 
+            # Käytä WebSocket-dataa jos saatavilla, muuten REST
+            transaction = self._ws_transaction if self._ws_transaction else rest_transaction
+
             return {
                 "transaction": transaction,
                 "charger_status": self._charger_status,
                 "monthly_stats": self._monthly_stats,
                 "yearly_stats": self._yearly_stats,
                 "leasing_refunds": self._leasing_refunds,
+                "ws_active": self._ws_transaction is not None,
             }
         except PlugitApiError as err:
             raise UpdateFailed(f"Plugit API error: {err}") from err
@@ -99,23 +98,49 @@ class PlugitCoordinator(DataUpdateCoordinator):
     async def _start_websocket(self) -> None:
         """Start WebSocket connection."""
         charge_box_id = self.entry.data[CONF_CHARGE_BOX_ID]
+        charge_point_id = self.entry.data.get(CONF_CHARGE_POINT_ID)
         self._ws = PlugitWebSocket(
             session=self._session,
             access_token=self.api._access_token,
             charge_box_id=charge_box_id,
+            charge_point_id=charge_point_id,
             on_status=self._on_status_update,
-            on_meter=self._on_meter_update,
+            on_transaction_update=self._on_transaction_update,
+            on_token_expiring=self._on_token_expiring,
         )
         await self._ws.start()
+        _LOGGER.info("Plugit WebSocket started")
 
     def _on_status_update(self, status: str) -> None:
-        """Handle real-time status update — adjust polling and refresh."""
+        """Handle real-time status update."""
         self._charger_status = status
         self._update_poll_interval()
+
+        # Jos laturi vapautuu, tyhjennä WS-data
+        if status == "Available":
+            self._ws_transaction = None
+
         self.hass.async_create_task(self.async_request_refresh())
 
-    def _on_meter_update(self, meter_data: dict) -> None:
+    def _on_transaction_update(self, data: dict) -> None:
+        """Handle real-time transaction update from WebSocket."""
+        self._ws_transaction = data
+        # Jos lataus päättyy, tyhjennä WS-data hetken kuluttua
+        if data.get("state") == "finished":
+            self._ws_transaction = None
         self.hass.async_create_task(self.async_request_refresh())
+
+    def _on_token_expiring(self) -> None:
+        """Handle token expiring — re-authenticate and update WebSocket token."""
+        async def _refresh():
+            try:
+                await self.api.authenticate()
+                if self._ws and self.api._access_token:
+                    self._ws.update_token(self.api._access_token)
+                    _LOGGER.info("Plugit WebSocket token renewed")
+            except Exception as err:
+                _LOGGER.warning("Failed to renew token: %s", err)
+        self.hass.async_create_task(_refresh())
 
     async def async_shutdown(self) -> None:
         if self._ws:
