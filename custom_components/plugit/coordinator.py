@@ -1,4 +1,4 @@
-"""Plugit data coordinator."""
+"""Plugit data coordinator with adaptive polling."""
 from __future__ import annotations
 
 from datetime import timedelta
@@ -16,16 +16,23 @@ from .websocket import PlugitWebSocket
 
 _LOGGER = logging.getLogger(__name__)
 
+# Polling intervals
+INTERVAL_ACTIVE = timedelta(seconds=30)    # Charging or car connected
+INTERVAL_IDLE = timedelta(minutes=60)      # No car connected
+
+# Charger statuses that indicate active/connected state
+ACTIVE_STATUSES = {"Preparing", "Charging", "Finishing", "SuspendedEV", "SuspendedEVSE"}
+
 
 class PlugitCoordinator(DataUpdateCoordinator):
-    """Plugit data coordinator."""
+    """Plugit data coordinator with adaptive polling."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=UPDATE_INTERVAL),
+            update_interval=INTERVAL_IDLE,
         )
         self.entry = entry
         self._session = async_get_clientsession(hass)
@@ -40,6 +47,17 @@ class PlugitCoordinator(DataUpdateCoordinator):
         self._yearly_stats: list = []
         self._leasing_refunds: list = []
         self._stats_update_counter: int = 0
+
+    def _update_poll_interval(self) -> None:
+        """Adjust polling interval based on charger status."""
+        if self._charger_status in ACTIVE_STATUSES:
+            new_interval = INTERVAL_ACTIVE
+        else:
+            new_interval = INTERVAL_IDLE
+
+        if self.update_interval != new_interval:
+            _LOGGER.debug("Plugit polling interval changed to %s", new_interval)
+            self.update_interval = new_interval
 
     async def _async_update_data(self) -> dict:
         """Fetch data from Plugit API."""
@@ -91,7 +109,9 @@ class PlugitCoordinator(DataUpdateCoordinator):
         await self._ws.start()
 
     def _on_status_update(self, status: str) -> None:
+        """Handle real-time status update — adjust polling and refresh."""
         self._charger_status = status
+        self._update_poll_interval()
         self.hass.async_create_task(self.async_request_refresh())
 
     def _on_meter_update(self, meter_data: dict) -> None:
