@@ -44,11 +44,16 @@ async def async_setup_entry(
 
 
 def _get_meter_value(transaction: dict, measurand: str, phase: str | None = None) -> float | None:
-    for mv in transaction.get("latestMeterValues", []):
-        if mv["measurand"] == measurand:
-            if phase is None or mv.get("phase") == phase:
-                return mv["value"]
-    return None
+    """Hae uusin mittariarvo timestampin mukaan."""
+    matches = [
+        mv for mv in transaction.get("latestMeterValues", [])
+        if mv["measurand"] == measurand and (phase is None or mv.get("phase") == phase)
+    ]
+    if not matches:
+        return None
+    # Ota uusin timestamp
+    latest = max(matches, key=lambda m: m.get("timestamp", ""))
+    return latest["value"]
 
 
 class PlugitBaseSensor(CoordinatorEntity, SensorEntity):
