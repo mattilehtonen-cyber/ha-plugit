@@ -127,13 +127,12 @@ This integration uses the Plugit Cloud API discovered through reverse engineerin
 - Data: `app-gw.plugitcloud.com`
 - WebSocket: `socket.plugitcloud.com` (Socket.IO)
 
-Data is refreshed every 30 seconds via REST API polling. Monthly and yearly statistics are refreshed every hour. A WebSocket connection provides real-time charger status updates.
+Real-time sensors (power, current, session energy, charger status) update instantly via a WebSocket connection. If the WebSocket is unavailable, the integration falls back to REST API polling — every 30 seconds while a car is connected, every 60 minutes when idle. Monthly and yearly statistics are refreshed once per hour.
 
 ## Known Limitations
 
 - Only works with chargers connected to the Plugit network
 - Multiple charger support is not yet implemented (uses the first charger on the account)
-- WebSocket Status sensor may show Unknown if the connection cannot be established
 - The private API may change at any time without notice
 
 ## Troubleshooting
@@ -148,7 +147,7 @@ Data is refreshed every 30 seconds via REST API polling. Monthly and yearly stat
 
 **Sensors show Unknown**
 - This is normal when no charging session is active
-- Start a charging session and wait up to 30 seconds for data to appear
+- Start a charging session and wait a few seconds for data to appear
 
 **Monthly/yearly stats not updating**
 - Statistics update once per hour
