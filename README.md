@@ -132,7 +132,7 @@ Real-time sensors (power, current, session energy, charger status) update instan
 ## Known Limitations
 
 - Only works with chargers connected to the Plugit network
-- Multiple charger support is not yet implemented (uses the first charger on the account)
+- Behavior with multiple chargers on one account has not been tested; the integration uses the first charger returned by the account's charger list
 - The private API may change at any time without notice
 
 ## Troubleshooting
