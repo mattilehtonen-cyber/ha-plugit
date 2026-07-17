@@ -37,6 +37,9 @@ async def async_setup_entry(
         PlugitVoltageL2Sensor(coordinator, entry),
         PlugitVoltageL3Sensor(coordinator, entry),
         PlugitSessionEnergySensor(coordinator, entry),
+        PlugitPeakPowerSensor(coordinator, entry),
+        PlugitSessionStartSensor(coordinator, entry),
+        PlugitProblemsSensor(coordinator, entry),
         PlugitStateSensor(coordinator, entry),
         PlugitChargerStatusSensor(coordinator, entry),
         # Monthly stats
@@ -47,6 +50,11 @@ async def async_setup_entry(
         # Leasing refunds
         PlugitCurrentMonthRefundSensor(coordinator, entry),
         PlugitCurrentMonthRefundPriceSensor(coordinator, entry),
+        PlugitElectricityPricingSensor(coordinator, entry),
+        PlugitFixedElectricityPriceSensor(coordinator, entry),
+        PlugitSpotPriceMarginSensor(coordinator, entry),
+        PlugitElectricityTaxSensor(coordinator, entry),
+        PlugitTransmissionPriceSensor(coordinator, entry),
         PlugitYearlyEnergySensor(coordinator, entry),
         PlugitYearlyRefundSensor(coordinator, entry),
     ])
@@ -74,8 +82,21 @@ class PlugitBaseSensor(CoordinatorEntity, SensorEntity):
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": "Plugit Charger",
             "manufacturer": "Plugit",
-            "model": "KEBA",
         }
+
+    @property
+    def device_info(self):
+        """Return device information provided by the active transaction."""
+        info = dict(self._attr_device_info)
+        transaction = self.transaction
+        if transaction:
+            info["name"] = transaction.get("chargePointName", info["name"])
+            info["manufacturer"] = transaction.get("chargePointVendor", info["manufacturer"])
+            if model := transaction.get("chargePointModel"):
+                info["model"] = model
+            if firmware := transaction.get("firmwareVersion"):
+                info["sw_version"] = firmware
+        return info
 
     @property
     def transaction(self) -> dict | None:
@@ -92,6 +113,10 @@ class PlugitBaseSensor(CoordinatorEntity, SensorEntity):
     @property
     def yearly_stats(self) -> list:
         return self.coordinator.data.get("yearly_stats", [])
+
+    @property
+    def home_charging_settings(self) -> dict | None:
+        return self.coordinator.data.get("home_charging_settings")
 
 
 # ---- Realtime sensors ----
@@ -237,6 +262,60 @@ class PlugitSessionEnergySensor(PlugitBaseSensor):
             except (ValueError, TypeError):
                 return None
         return None
+
+
+class PlugitPeakPowerSensor(PlugitBaseSensor):
+    _attr_name = "Plugit Session Peak Power"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry, "session_peak_power")
+
+    @property
+    def native_value(self):
+        if self.transaction:
+            return self.coordinator.data.get("session_peak_power")
+        return None
+
+
+class PlugitSessionStartSensor(PlugitBaseSensor):
+    _attr_name = "Plugit Session Start"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:clock-start"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry, "session_start")
+
+    @property
+    def native_value(self):
+        if not self.transaction or not (timestamp := self.transaction.get("timestampStart")):
+            return None
+        try:
+            return datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+
+class PlugitProblemsSensor(PlugitBaseSensor):
+    _attr_name = "Plugit Charger Problems"
+    _attr_icon = "mdi:alert-circle-outline"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry, "charger_problems")
+
+    @property
+    def native_value(self):
+        if not self.transaction:
+            return "unknown"
+        return "problem" if self.transaction.get("problems") else "clear"
+
+    @property
+    def extra_state_attributes(self):
+        if not self.transaction:
+            return None
+        return {"problems": self.transaction.get("problems", [])}
 
 
 class PlugitStateSensor(PlugitBaseSensor):
@@ -385,6 +464,95 @@ class PlugitCurrentMonthRefundPriceSensor(PlugitBaseSensor):
             month = refund.get("activeMonth", "")
             if f"{now.year}-{now.month:02d}" in month:
                 return round(refund.get("averageEnergyPrice", 0) / 100, 4)
+        return None
+
+
+class PlugitElectricityPricingSensor(PlugitBaseSensor):
+    _attr_name = "Plugit Electricity Pricing"
+    _attr_icon = "mdi:transmission-tower"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry, "electricity_pricing")
+
+    @property
+    def native_value(self):
+        settings = self.home_charging_settings
+        if not settings:
+            return None
+        return "spot" if settings.get("spotPricing", {}).get("active") else "fixed"
+
+    @property
+    def extra_state_attributes(self):
+        settings = self.home_charging_settings
+        if not settings:
+            return None
+        return {"spot_price_interval": settings.get("spotPricing", {}).get("mtu")}
+
+
+class PlugitFixedElectricityPriceSensor(PlugitBaseSensor):
+    _attr_name = "Plugit Fixed Electricity Price"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "EUR/kWh"
+    _attr_icon = "mdi:currency-eur"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry, "fixed_electricity_price")
+
+    @property
+    def native_value(self):
+        if self.home_charging_settings:
+            return round(self.home_charging_settings.get("kwhPrice", 0) / 100, 6)
+        return None
+
+
+class PlugitSpotPriceMarginSensor(PlugitBaseSensor):
+    _attr_name = "Plugit Spot Price Margin"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "EUR/kWh"
+    _attr_icon = "mdi:chart-line"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry, "spot_price_margin")
+
+    @property
+    def native_value(self):
+        settings = self.home_charging_settings
+        if settings:
+            return round(settings.get("spotPricing", {}).get("margin", 0) / 100, 6)
+        return None
+
+
+class PlugitElectricityTaxSensor(PlugitBaseSensor):
+    _attr_name = "Plugit Electricity Tax"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "EUR/kWh"
+    _attr_icon = "mdi:receipt-text"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry, "electricity_tax")
+
+    @property
+    def native_value(self):
+        if self.home_charging_settings:
+            return round(self.home_charging_settings.get("electricityTax", 0) / 100, 6)
+        return None
+
+
+class PlugitTransmissionPriceSensor(PlugitBaseSensor):
+    _attr_name = "Plugit Transmission Price"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "EUR/kWh"
+    _attr_icon = "mdi:transmission-tower"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry, "transmission_price")
+
+    @property
+    def native_value(self):
+        settings = self.home_charging_settings
+        if settings:
+            transmission = settings.get("transmission", {})
+            return round(transmission.get("staticPrice", 0) / 100, 6)
         return None
 
 

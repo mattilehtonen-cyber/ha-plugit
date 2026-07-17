@@ -8,6 +8,7 @@ import aiohttp
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import PlugitApi, PlugitApiError
@@ -41,9 +42,12 @@ class PlugitCoordinator(DataUpdateCoordinator):
         self._ws: PlugitWebSocket | None = None
         self._charger_status: str = "Unknown"
         self._ws_transaction: dict | None = None  # WebSocket transaction data
+        self._session_peak_power: float | None = None
+        self._peak_transaction_id: str | int | None = None
         self._monthly_stats: dict | None = None
         self._yearly_stats: list = []
         self._leasing_refunds: list = []
+        self._home_charging_settings: dict | None = None
         self._last_stats_update: datetime | None = None
         self._initial_rest_update_done = False
 
@@ -80,6 +84,7 @@ class PlugitCoordinator(DataUpdateCoordinator):
 
             # Käytä WebSocket-dataa jos saatavilla, muuten REST
             transaction = self._ws_transaction if self._ws_transaction else rest_transaction
+            self._update_session_peak_power(transaction)
 
             return {
                 "transaction": transaction,
@@ -87,7 +92,9 @@ class PlugitCoordinator(DataUpdateCoordinator):
                 "monthly_stats": self._monthly_stats,
                 "yearly_stats": self._yearly_stats,
                 "leasing_refunds": self._leasing_refunds,
+                "home_charging_settings": self._home_charging_settings,
                 "ws_active": self._ws_transaction is not None,
+                "session_peak_power": self._session_peak_power if transaction else None,
             }
         except PlugitApiError as err:
             raise UpdateFailed(f"Plugit API error: {err}") from err
@@ -100,6 +107,7 @@ class PlugitCoordinator(DataUpdateCoordinator):
             self._monthly_stats = await self.api.get_monthly_stats()
             self._yearly_stats = await self.api.get_yearly_stats()
             self._leasing_refunds = await self.api.get_leasing_refunds()
+            self._home_charging_settings = await self.api.get_home_charging_settings()
             self._last_stats_update = datetime.now()
         except Exception as err:
             _LOGGER.warning("Failed to update stats: %s", err)
@@ -135,10 +143,59 @@ class PlugitCoordinator(DataUpdateCoordinator):
     def _on_transaction_update(self, data: dict) -> None:
         """Handle real-time transaction update from WebSocket."""
         self._ws_transaction = data
+        self._update_device_info(data)
+        # The status channel does not always replay its latest value after a
+        # reconnect. A live transaction still gives us an unambiguous status.
+        if self._charger_status == "Unknown" and data.get("state") == "ongoing":
+            self._charger_status = "Charging"
+            self._update_poll_interval()
         # Jos lataus päättyy, tyhjennä WS-data hetken kuluttua
         if data.get("state") == "finished":
             self._ws_transaction = None
         self.hass.async_create_task(self.async_request_refresh())
+
+    def _update_device_info(self, transaction: dict) -> None:
+        """Update Home Assistant's device registry from transaction metadata."""
+        registry = dr.async_get(self.hass)
+        device = registry.async_get_device(identifiers={(DOMAIN, self.entry.entry_id)})
+        if not device:
+            return
+
+        values = {
+            "name": transaction.get("chargePointName"),
+            "manufacturer": transaction.get("chargePointVendor"),
+            "model": transaction.get("chargePointModel"),
+            "sw_version": transaction.get("firmwareVersion"),
+        }
+        updates = {
+            field: value
+            for field, value in values.items()
+            if value and getattr(device, field) != value
+        }
+        if updates:
+            registry.async_update_device(device.id, **updates)
+
+    def _update_session_peak_power(self, transaction: dict | None) -> None:
+        """Calculate the session peak from real-time power meter values."""
+        if not transaction:
+            return
+
+        transaction_id = transaction.get("_id") or transaction.get("transactionId")
+        if transaction_id != self._peak_transaction_id:
+            self._peak_transaction_id = transaction_id
+            self._session_peak_power = None
+
+        powers = [
+            value.get("value")
+            for value in transaction.get("latestMeterValues", [])
+            if value.get("measurand") == "Power.Active.Import"
+        ]
+        for power in powers:
+            try:
+                power_value = float(power)
+            except (TypeError, ValueError):
+                continue
+            self._session_peak_power = max(self._session_peak_power or 0, power_value)
 
     def _on_websocket_connection_change(self, connected: bool) -> None:
         """Refresh state when WebSocket availability changes."""

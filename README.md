@@ -14,10 +14,13 @@ An unofficial Home Assistant custom component for Plugit EV charging network. Al
 - Voltage per phase (L1, L2, L3)
 - Charger offered current (A)
 - Session energy (kWh)
+- Session peak power and start time
+- Charger problem status and device firmware information
 - Charging state (ongoing / idle)
 - Monthly statistics (energy, sessions, CO2 savings, charging time)
 - Yearly statistics (energy, total refund)
 - Leasing refund tracking (€ and €/kWh)
+- Home-charging price settings (fixed or spot pricing, margin, transmission and electricity tax)
 - Automatic authentication and token renewal
 - Auto-discovery of charger details on setup
 
@@ -81,6 +84,9 @@ Restart Home Assistant after copying the files.
 | Plugit Voltage L2 | Sensor | Phase L2 voltage (V) |
 | Plugit Voltage L3 | Sensor | Phase L3 voltage (V) |
 | Plugit Session Energy | Sensor | Current session energy (kWh) |
+| Plugit Session Peak Power | Sensor | Highest power reported for the session (W) |
+| Plugit Session Start | Sensor | Current session start time |
+| Plugit Charger Problems | Sensor | Charger-reported problem status |
 | Plugit State | Sensor | Charging state (ongoing/idle) |
 | Plugit Charger Status | Sensor | OCPP status via WebSocket |
 | Plugit Monthly Energy | Sensor | Energy this month (kWh) |
@@ -89,6 +95,11 @@ Restart Home Assistant after copying the files.
 | Plugit Monthly Charging Time | Sensor | Total charging time this month (h) |
 | Plugit Monthly Refund | Sensor | Leasing refund this month (€) |
 | Plugit Refund Price | Sensor | Current refund rate (€/kWh) |
+| Plugit Electricity Pricing | Sensor | Configured pricing mode (spot/fixed) |
+| Plugit Fixed Electricity Price | Sensor | Configured fixed electricity price (€/kWh) |
+| Plugit Spot Price Margin | Sensor | Configured spot-price margin (€/kWh) |
+| Plugit Electricity Tax | Sensor | Configured electricity tax (€/kWh) |
+| Plugit Transmission Price | Sensor | Configured transmission price (€/kWh) |
 | Plugit Yearly Energy | Sensor | Energy this year (kWh) |
 | Plugit Yearly Refund | Sensor | Total leasing refund this year (€) |
 
@@ -133,7 +144,7 @@ This integration uses the Plugit Cloud API discovered through reverse engineerin
 - Data: `app-gw.plugitcloud.com`
 - WebSocket: `socket.plugitcloud.com` (Socket.IO)
 
-Real-time sensors (power, current, voltage, offered current, session energy and charger status) update via a WebSocket connection. The integration uses REST only to fetch the initial state, while the WebSocket is unavailable, and for monthly and yearly statistics. Statistics are refreshed once per hour.
+Real-time sensors (power, current, voltage, offered current, session energy, session peak power and charger status) update via a WebSocket connection. The integration uses REST only to fetch the initial state, while the WebSocket is unavailable, and for monthly and yearly statistics. Statistics are refreshed once per hour. Charger manufacturer, model and firmware are updated from active charging transactions when available.
 
 ## Known Limitations
 

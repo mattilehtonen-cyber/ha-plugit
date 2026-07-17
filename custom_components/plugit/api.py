@@ -105,6 +105,13 @@ class PlugitApi:
             await self.authenticate()
         return await self._get(f"{API_BASE}/leasing/refunds")
 
+    async def get_home_charging_settings(self) -> dict | None:
+        """Get configured home-charging electricity price settings."""
+        if not self._access_token:
+            await self.authenticate()
+        data = await self._get(f"{API_BASE}/leasing/home-charging")
+        return data[0] if isinstance(data, list) and data else None
+
     async def start_charging(self, charge_box_id: str, charge_box_group_id: str) -> bool:
         """Start charging session."""
         if not self._access_token:
