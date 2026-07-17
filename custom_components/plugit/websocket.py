@@ -32,6 +32,7 @@ class PlugitWebSocket:
         on_status: Callable[[str], None],
         on_transaction_update: Callable[[dict], None],
         on_token_expiring: Callable[[], None] | None = None,
+        on_connection_change: Callable[[bool], None] | None = None,
     ) -> None:
         self._session = session
         self._access_token = access_token
@@ -40,9 +41,24 @@ class PlugitWebSocket:
         self._on_status = on_status
         self._on_transaction_update = on_transaction_update
         self._on_token_expiring = on_token_expiring
+        self._on_connection_change = on_connection_change
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._task: asyncio.Task | None = None
         self._running = False
+        self._connected = False
+
+    @property
+    def connected(self) -> bool:
+        """Return whether the socket is registered for updates."""
+        return self._connected
+
+    def _set_connected(self, connected: bool) -> None:
+        """Update connection state and notify the coordinator."""
+        if self._connected == connected:
+            return
+        self._connected = connected
+        if self._on_connection_change:
+            self._on_connection_change(connected)
 
     async def start(self) -> None:
         self._running = True
@@ -50,6 +66,7 @@ class PlugitWebSocket:
 
     async def stop(self) -> None:
         self._running = False
+        self._set_connected(False)
         if self._ws:
             await self._ws.close()
         if self._task:
@@ -63,6 +80,7 @@ class PlugitWebSocket:
             try:
                 await self._connect()
             except Exception as err:
+                self._set_connected(False)
                 _LOGGER.warning("Plugit WebSocket error: %s, reconnecting in 30s", err)
                 await asyncio.sleep(30)
 
@@ -109,6 +127,7 @@ class PlugitWebSocket:
             # 3. Rekisteröi socket kaikkiin kanaviin VASTA nyt
             if socket_id:
                 await self._register_socket(socket_id)
+                self._set_connected(True)
                 _LOGGER.info("Plugit WebSocket registered, listening for data")
 
             # 4. Kuuntele viestejä
@@ -121,6 +140,8 @@ class PlugitWebSocket:
                 elif msg.type == aiohttp.WSMsgType.CLOSED:
                     _LOGGER.debug("WebSocket closed")
                     break
+
+            self._set_connected(False)
 
     async def _handle_message(self, raw: str) -> None:
         # Ping → pong

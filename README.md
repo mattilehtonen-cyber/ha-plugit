@@ -11,6 +11,8 @@ An unofficial Home Assistant custom component for Plugit EV charging network. Al
 - Start and stop charging (switch)
 - Real-time power monitoring (W)
 - Current per phase (L1, L2, L3)
+- Voltage per phase (L1, L2, L3)
+- Charger offered current (A)
 - Session energy (kWh)
 - Charging state (ongoing / idle)
 - Monthly statistics (energy, sessions, CO2 savings, charging time)
@@ -74,6 +76,10 @@ Restart Home Assistant after copying the files.
 | Plugit Current L1 | Sensor | Phase L1 current (A) |
 | Plugit Current L2 | Sensor | Phase L2 current (A) |
 | Plugit Current L3 | Sensor | Phase L3 current (A) |
+| Plugit Offered Current | Sensor | Current offered by the charger (A) |
+| Plugit Voltage L1 | Sensor | Phase L1 voltage (V) |
+| Plugit Voltage L2 | Sensor | Phase L2 voltage (V) |
+| Plugit Voltage L3 | Sensor | Phase L3 voltage (V) |
 | Plugit Session Energy | Sensor | Current session energy (kWh) |
 | Plugit State | Sensor | Charging state (ongoing/idle) |
 | Plugit Charger Status | Sensor | OCPP status via WebSocket |
@@ -127,7 +133,7 @@ This integration uses the Plugit Cloud API discovered through reverse engineerin
 - Data: `app-gw.plugitcloud.com`
 - WebSocket: `socket.plugitcloud.com` (Socket.IO)
 
-Real-time sensors (power, current, session energy, charger status) update instantly via a WebSocket connection. If the WebSocket is unavailable, the integration falls back to REST API polling — every 30 seconds while a car is connected, every 60 minutes when idle. Monthly and yearly statistics are refreshed once per hour.
+Real-time sensors (power, current, voltage, offered current, session energy and charger status) update via a WebSocket connection. The integration uses REST only to fetch the initial state, while the WebSocket is unavailable, and for monthly and yearly statistics. Statistics are refreshed once per hour.
 
 ## Known Limitations
 
@@ -148,6 +154,7 @@ Real-time sensors (power, current, session energy, charger status) update instan
 **Sensors show Unknown**
 - This is normal when no charging session is active
 - Start a charging session and wait a few seconds for data to appear
+- Voltage, current, power and offered-current sensors are available only while the charger reports an active transaction
 
 **Monthly/yearly stats not updating**
 - Statistics update once per hour

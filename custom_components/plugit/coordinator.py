@@ -1,7 +1,7 @@
 """Plugit data coordinator with WebSocket real-time updates."""
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 import logging
 
 import aiohttp
@@ -11,7 +11,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import PlugitApi, PlugitApiError
-from .const import DOMAIN, UPDATE_INTERVAL, STATS_UPDATE_INTERVAL, CONF_EMAIL, CONF_PASSWORD, CONF_CHARGE_BOX_ID, CONF_CHARGE_POINT_ID
+from .const import DOMAIN, STATS_UPDATE_INTERVAL, CONF_EMAIL, CONF_PASSWORD, CONF_CHARGE_BOX_ID, CONF_CHARGE_POINT_ID
 from .websocket import PlugitWebSocket
 
 _LOGGER = logging.getLogger(__name__)
@@ -44,7 +44,8 @@ class PlugitCoordinator(DataUpdateCoordinator):
         self._monthly_stats: dict | None = None
         self._yearly_stats: list = []
         self._leasing_refunds: list = []
-        self._stats_update_counter: int = 0
+        self._last_stats_update: datetime | None = None
+        self._initial_rest_update_done = False
 
     def _update_poll_interval(self) -> None:
         """Adjust polling interval based on charger status."""
@@ -57,17 +58,24 @@ class PlugitCoordinator(DataUpdateCoordinator):
         """Fetch data from Plugit API."""
         try:
             # Hae REST-data — käytetään jos WebSocket-data puuttuu
-            rest_transaction = await self.api.get_active_transaction()
-
             if self._ws is None and self.api._access_token:
                 await self._start_websocket()
 
-            self._stats_update_counter += 1
-            if self._stats_update_counter >= (STATS_UPDATE_INTERVAL // UPDATE_INTERVAL):
-                self._stats_update_counter = 0
-                await self._update_stats()
+            # REST is used only for the initial state and while WebSocket is
+            # unavailable. Normal real-time updates arrive via WebSocket.
+            use_rest = not self._initial_rest_update_done or not (
+                self._ws and self._ws.connected
+            )
+            rest_transaction = None
+            if use_rest:
+                rest_transaction = await self.api.get_active_transaction()
+                self._initial_rest_update_done = True
 
-            if not self._monthly_stats:
+            if (
+                self._last_stats_update is None
+                or datetime.now() - self._last_stats_update
+                >= timedelta(seconds=STATS_UPDATE_INTERVAL)
+            ):
                 await self._update_stats()
 
             # Käytä WebSocket-dataa jos saatavilla, muuten REST
@@ -92,6 +100,7 @@ class PlugitCoordinator(DataUpdateCoordinator):
             self._monthly_stats = await self.api.get_monthly_stats()
             self._yearly_stats = await self.api.get_yearly_stats()
             self._leasing_refunds = await self.api.get_leasing_refunds()
+            self._last_stats_update = datetime.now()
         except Exception as err:
             _LOGGER.warning("Failed to update stats: %s", err)
 
@@ -107,6 +116,7 @@ class PlugitCoordinator(DataUpdateCoordinator):
             on_status=self._on_status_update,
             on_transaction_update=self._on_transaction_update,
             on_token_expiring=self._on_token_expiring,
+            on_connection_change=self._on_websocket_connection_change,
         )
         await self._ws.start()
         _LOGGER.info("Plugit WebSocket started")
@@ -128,6 +138,11 @@ class PlugitCoordinator(DataUpdateCoordinator):
         # Jos lataus päättyy, tyhjennä WS-data hetken kuluttua
         if data.get("state") == "finished":
             self._ws_transaction = None
+        self.hass.async_create_task(self.async_request_refresh())
+
+    def _on_websocket_connection_change(self, connected: bool) -> None:
+        """Refresh state when WebSocket availability changes."""
+        _LOGGER.info("Plugit WebSocket %s", "connected" if connected else "disconnected")
         self.hass.async_create_task(self.async_request_refresh())
 
     def _on_token_expiring(self) -> None:

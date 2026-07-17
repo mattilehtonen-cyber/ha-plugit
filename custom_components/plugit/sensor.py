@@ -8,7 +8,12 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfPower, UnitOfEnergy, UnitOfElectricCurrent
+from homeassistant.const import (
+    UnitOfElectricCurrent,
+    UnitOfElectricPotential,
+    UnitOfEnergy,
+    UnitOfPower,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -27,6 +32,10 @@ async def async_setup_entry(
         PlugitCurrentL1Sensor(coordinator, entry),
         PlugitCurrentL2Sensor(coordinator, entry),
         PlugitCurrentL3Sensor(coordinator, entry),
+        PlugitOfferedCurrentSensor(coordinator, entry),
+        PlugitVoltageL1Sensor(coordinator, entry),
+        PlugitVoltageL2Sensor(coordinator, entry),
+        PlugitVoltageL3Sensor(coordinator, entry),
         PlugitSessionEnergySensor(coordinator, entry),
         PlugitStateSensor(coordinator, entry),
         PlugitChargerStatusSensor(coordinator, entry),
@@ -149,6 +158,66 @@ class PlugitCurrentL3Sensor(PlugitBaseSensor):
         if self.transaction:
             return _get_meter_value(self.transaction, "Current.Import", "L3")
         return None
+
+
+class PlugitOfferedCurrentSensor(PlugitBaseSensor):
+    """Maximum current currently offered by the charger."""
+
+    _attr_name = "Plugit Offered Current"
+    _attr_device_class = SensorDeviceClass.CURRENT
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry, "offered_current")
+
+    @property
+    def native_value(self):
+        if self.transaction:
+            return _get_meter_value(self.transaction, "Current.Offered")
+        return None
+
+
+class PlugitVoltageL1Sensor(PlugitBaseSensor):
+    _attr_name = "Plugit Voltage L1"
+    _attr_device_class = SensorDeviceClass.VOLTAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfElectricPotential.VOLT
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry, "voltage_l1")
+
+    @property
+    def native_value(self):
+        return _get_meter_value(self.transaction, "Voltage", "L1") if self.transaction else None
+
+
+class PlugitVoltageL2Sensor(PlugitBaseSensor):
+    _attr_name = "Plugit Voltage L2"
+    _attr_device_class = SensorDeviceClass.VOLTAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfElectricPotential.VOLT
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry, "voltage_l2")
+
+    @property
+    def native_value(self):
+        return _get_meter_value(self.transaction, "Voltage", "L2") if self.transaction else None
+
+
+class PlugitVoltageL3Sensor(PlugitBaseSensor):
+    _attr_name = "Plugit Voltage L3"
+    _attr_device_class = SensorDeviceClass.VOLTAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfElectricPotential.VOLT
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry, "voltage_l3")
+
+    @property
+    def native_value(self):
+        return _get_meter_value(self.transaction, "Voltage", "L3") if self.transaction else None
 
 
 class PlugitSessionEnergySensor(PlugitBaseSensor):
