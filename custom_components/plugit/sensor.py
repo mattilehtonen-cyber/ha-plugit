@@ -492,7 +492,7 @@ class PlugitElectricityPricingSensor(PlugitBaseSensor):
 class PlugitFixedElectricityPriceSensor(PlugitBaseSensor):
     _attr_name = "Plugit Fixed Electricity Price"
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = "EUR/kWh"
+    _attr_native_unit_of_measurement = "c/kWh"
     _attr_icon = "mdi:currency-eur"
 
     def __init__(self, coordinator, entry):
@@ -501,14 +501,14 @@ class PlugitFixedElectricityPriceSensor(PlugitBaseSensor):
     @property
     def native_value(self):
         if self.home_charging_settings:
-            return round(self.home_charging_settings.get("kwhPrice", 0) / 100, 6)
+            return self.home_charging_settings.get("kwhPrice", 0)
         return None
 
 
 class PlugitSpotPriceMarginSensor(PlugitBaseSensor):
     _attr_name = "Plugit Spot Price Margin"
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = "EUR/kWh"
+    _attr_native_unit_of_measurement = "c/kWh"
     _attr_icon = "mdi:chart-line"
 
     def __init__(self, coordinator, entry):
@@ -518,14 +518,14 @@ class PlugitSpotPriceMarginSensor(PlugitBaseSensor):
     def native_value(self):
         settings = self.home_charging_settings
         if settings:
-            return round(settings.get("spotPricing", {}).get("margin", 0) / 100, 6)
+            return settings.get("spotPricing", {}).get("margin", 0)
         return None
 
 
 class PlugitElectricityTaxSensor(PlugitBaseSensor):
     _attr_name = "Plugit Electricity Tax"
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = "EUR/kWh"
+    _attr_native_unit_of_measurement = "c/kWh"
     _attr_icon = "mdi:receipt-text"
 
     def __init__(self, coordinator, entry):
@@ -534,14 +534,14 @@ class PlugitElectricityTaxSensor(PlugitBaseSensor):
     @property
     def native_value(self):
         if self.home_charging_settings:
-            return round(self.home_charging_settings.get("electricityTax", 0) / 100, 6)
+            return self.home_charging_settings.get("electricityTax", 0)
         return None
 
 
 class PlugitTransmissionPriceSensor(PlugitBaseSensor):
     _attr_name = "Plugit Transmission Price"
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = "EUR/kWh"
+    _attr_native_unit_of_measurement = "c/kWh"
     _attr_icon = "mdi:transmission-tower"
 
     def __init__(self, coordinator, entry):
@@ -552,7 +552,7 @@ class PlugitTransmissionPriceSensor(PlugitBaseSensor):
         settings = self.home_charging_settings
         if settings:
             transmission = settings.get("transmission", {})
-            return round(transmission.get("staticPrice", 0) / 100, 6)
+            return transmission.get("staticPrice", 0)
         return None
 
 

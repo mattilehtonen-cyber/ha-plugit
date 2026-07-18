@@ -96,10 +96,10 @@ Restart Home Assistant after copying the files.
 | Plugit Monthly Refund | Sensor | Leasing refund this month (€) |
 | Plugit Refund Price | Sensor | Current refund rate (€/kWh) |
 | Plugit Electricity Pricing | Sensor | Configured pricing mode (spot/fixed) |
-| Plugit Fixed Electricity Price | Sensor | Configured fixed electricity price (€/kWh) |
-| Plugit Spot Price Margin | Sensor | Configured spot-price margin (€/kWh) |
-| Plugit Electricity Tax | Sensor | Configured electricity tax (€/kWh) |
-| Plugit Transmission Price | Sensor | Configured transmission price (€/kWh) |
+| Plugit Fixed Electricity Price | Sensor | Configured fixed electricity price (c/kWh) |
+| Plugit Spot Price Margin | Sensor | Configured spot-price margin (c/kWh) |
+| Plugit Electricity Tax | Sensor | Configured electricity tax (c/kWh) |
+| Plugit Transmission Price | Sensor | Configured transmission price (c/kWh) |
 | Plugit Yearly Energy | Sensor | Energy this year (kWh) |
 | Plugit Yearly Refund | Sensor | Total leasing refund this year (€) |
 
