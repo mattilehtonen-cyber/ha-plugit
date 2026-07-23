@@ -39,6 +39,7 @@ async def async_setup_entry(
         PlugitSessionEnergySensor(coordinator, entry),
         PlugitPeakPowerSensor(coordinator, entry),
         PlugitSessionStartSensor(coordinator, entry),
+        PlugitFullyChargedSensor(coordinator, entry),
         PlugitProblemsSensor(coordinator, entry),
         PlugitStateSensor(coordinator, entry),
         PlugitChargerStatusSensor(coordinator, entry),
@@ -64,7 +65,7 @@ def _get_meter_value(transaction: dict, measurand: str, phase: str | None = None
     """Hae uusin mittariarvo timestampin mukaan."""
     matches = [
         mv for mv in transaction.get("latestMeterValues", [])
-        if mv["measurand"] == measurand and (phase is None or mv.get("phase") == phase)
+        if mv.get("measurand") == measurand and (phase is None or mv.get("phase") == phase)
     ]
     if not matches:
         return None
@@ -258,7 +259,16 @@ class PlugitSessionEnergySensor(PlugitBaseSensor):
     def native_value(self):
         if self.transaction:
             try:
-                return round(float(self.transaction.get("energy", 0)) / 1000, 3)
+                energy = float(self.transaction.get("energy", 0))
+                if energy > 0:
+                    return round(energy / 1000, 3)
+
+                meter_start = float(self.transaction.get("meterStart", 0))
+                meter_now = _get_meter_value(
+                    self.transaction, "Energy.Active.Import.Register"
+                )
+                if meter_now is not None and meter_start > 0:
+                    return round(max(0, float(meter_now) - meter_start) / 1000, 3)
             except (ValueError, TypeError):
                 return None
         return None
@@ -298,6 +308,26 @@ class PlugitSessionStartSensor(PlugitBaseSensor):
             return None
 
 
+class PlugitFullyChargedSensor(PlugitBaseSensor):
+    _attr_name = "Plugit Fully Charged"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:battery-check"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry, "fully_charged")
+
+    @property
+    def native_value(self):
+        if not self.transaction or not (
+            timestamp := self.transaction.get("timestampFullyCharged")
+        ):
+            return None
+        try:
+            return datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+
 class PlugitProblemsSensor(PlugitBaseSensor):
     _attr_name = "Plugit Charger Problems"
     _attr_icon = "mdi:alert-circle-outline"
@@ -327,8 +357,19 @@ class PlugitStateSensor(PlugitBaseSensor):
     @property
     def native_value(self):
         if self.transaction:
+            if self.transaction.get("timestampFullyCharged"):
+                return "fully_charged"
             return self.transaction.get("state")
         return "idle"
+
+    @property
+    def extra_state_attributes(self):
+        if not self.transaction:
+            return None
+        return {
+            "raw_transaction_state": self.transaction.get("state"),
+            "fully_charged_at": self.transaction.get("timestampFullyCharged"),
+        }
 
 
 class PlugitChargerStatusSensor(PlugitBaseSensor):
@@ -339,6 +380,8 @@ class PlugitChargerStatusSensor(PlugitBaseSensor):
 
     @property
     def native_value(self):
+        if self.transaction and self.transaction.get("timestampFullyCharged"):
+            return "Fully Charged"
         return self.coordinator.data.get("charger_status", "Unknown")
 
 

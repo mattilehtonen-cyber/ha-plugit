@@ -18,7 +18,9 @@ from .websocket import PlugitWebSocket
 _LOGGER = logging.getLogger(__name__)
 
 INTERVAL_ACTIVE = timedelta(seconds=30)
+INTERVAL_FULLY_CHARGED = timedelta(minutes=5)
 INTERVAL_IDLE = timedelta(minutes=60)
+WEBSOCKET_STALE_AFTER = timedelta(minutes=2)
 ACTIVE_STATUSES = {"Preparing", "Charging", "Finishing", "SuspendedEV", "SuspendedEVSE"}
 
 
@@ -42,6 +44,8 @@ class PlugitCoordinator(DataUpdateCoordinator):
         self._ws: PlugitWebSocket | None = None
         self._charger_status: str = "Unknown"
         self._ws_transaction: dict | None = None  # WebSocket transaction data
+        self._rest_transaction: dict | None = None
+        self._last_ws_transaction_update: datetime | None = None
         self._session_peak_power: float | None = None
         self._peak_transaction_id: str | int | None = None
         self._monthly_stats: dict | None = None
@@ -53,7 +57,12 @@ class PlugitCoordinator(DataUpdateCoordinator):
 
     def _update_poll_interval(self) -> None:
         """Adjust polling interval based on charger status."""
-        new_interval = INTERVAL_ACTIVE if self._charger_status in ACTIVE_STATUSES else INTERVAL_IDLE
+        if self._charger_status in ACTIVE_STATUSES:
+            new_interval = INTERVAL_ACTIVE
+        elif self._charger_status == "Fully Charged":
+            new_interval = INTERVAL_FULLY_CHARGED
+        else:
+            new_interval = INTERVAL_IDLE
         if self.update_interval != new_interval:
             _LOGGER.debug("Plugit polling interval changed to %s", new_interval)
             self.update_interval = new_interval
@@ -67,13 +76,28 @@ class PlugitCoordinator(DataUpdateCoordinator):
 
             # REST is used only for the initial state and while WebSocket is
             # unavailable. Normal real-time updates arrive via WebSocket.
-            use_rest = not self._initial_rest_update_done or not (
-                self._ws and self._ws.connected
+            websocket_stale = (
+                self._last_ws_transaction_update is None
+                or datetime.now() - self._last_ws_transaction_update
+                >= WEBSOCKET_STALE_AFTER
+            )
+            use_rest = (
+                not self._initial_rest_update_done
+                or not (self._ws and self._ws.connected)
+                or websocket_stale
             )
             rest_transaction = None
             if use_rest:
                 rest_transaction = await self.api.get_active_transaction()
+                self._rest_transaction = rest_transaction
                 self._initial_rest_update_done = True
+                self._update_status_from_transaction(rest_transaction)
+
+            # The initial REST request authenticates the client. Start the
+            # WebSocket immediately afterwards instead of waiting for the
+            # next coordinator refresh.
+            if self._ws is None and self.api._access_token:
+                await self._start_websocket()
 
             if (
                 self._last_stats_update is None
@@ -83,7 +107,16 @@ class PlugitCoordinator(DataUpdateCoordinator):
                 await self._update_stats()
 
             # Käytä WebSocket-dataa jos saatavilla, muuten REST
-            transaction = self._ws_transaction if self._ws_transaction else rest_transaction
+            transaction = (
+                self._ws_transaction
+                if (
+                    self._ws
+                    and self._ws.connected
+                    and self._ws_transaction
+                    and not websocket_stale
+                )
+                else self._rest_transaction
+            )
             self._update_session_peak_power(transaction)
 
             return {
@@ -123,6 +156,7 @@ class PlugitCoordinator(DataUpdateCoordinator):
             charge_point_id=charge_point_id,
             on_status=self._on_status_update,
             on_transaction_update=self._on_transaction_update,
+            on_transaction_stopped=self._on_transaction_stopped,
             on_token_expiring=self._on_token_expiring,
             on_connection_change=self._on_websocket_connection_change,
         )
@@ -137,12 +171,14 @@ class PlugitCoordinator(DataUpdateCoordinator):
         # Jos laturi vapautuu, tyhjennä WS-data
         if status == "Available":
             self._ws_transaction = None
+            self._rest_transaction = None
 
         self.hass.async_create_task(self.async_request_refresh())
 
     def _on_transaction_update(self, data: dict) -> None:
         """Handle real-time transaction update from WebSocket."""
         self._ws_transaction = data
+        self._last_ws_transaction_update = datetime.now()
         self._update_device_info(data)
         # The status channel does not always replay its latest value after a
         # reconnect. A live transaction still gives us an unambiguous status.
@@ -153,6 +189,23 @@ class PlugitCoordinator(DataUpdateCoordinator):
         if data.get("state") == "finished":
             self._ws_transaction = None
         self.hass.async_create_task(self.async_request_refresh())
+
+    def _on_transaction_stopped(self) -> None:
+        """Clear cached transaction when the socket reports a stop event."""
+        self._ws_transaction = None
+        self._rest_transaction = None
+        self._last_ws_transaction_update = None
+        self.hass.async_create_task(self.async_request_refresh())
+
+    def _update_status_from_transaction(self, transaction: dict | None) -> None:
+        """Derive a useful status when the server does not push one via WebSocket."""
+        if not transaction:
+            return
+        if transaction.get("timestampFullyCharged"):
+            self._charger_status = "Fully Charged"
+        elif transaction.get("state") == "ongoing":
+            self._charger_status = "Charging"
+        self._update_poll_interval()
 
     def _update_device_info(self, transaction: dict) -> None:
         """Update Home Assistant's device registry from transaction metadata."""
@@ -200,6 +253,10 @@ class PlugitCoordinator(DataUpdateCoordinator):
     def _on_websocket_connection_change(self, connected: bool) -> None:
         """Refresh state when WebSocket availability changes."""
         _LOGGER.info("Plugit WebSocket %s", "connected" if connected else "disconnected")
+        if not connected:
+            self._ws_transaction = None
+            self._last_ws_transaction_update = None
+            self._charger_status = "Unknown"
         self.hass.async_create_task(self.async_request_refresh())
 
     def _on_token_expiring(self) -> None:
@@ -208,7 +265,7 @@ class PlugitCoordinator(DataUpdateCoordinator):
             try:
                 await self.api.authenticate()
                 if self._ws and self.api._access_token:
-                    self._ws.update_token(self.api._access_token)
+                    await self._ws.update_token(self.api._access_token)
                     _LOGGER.info("Plugit WebSocket token renewed")
             except Exception as err:
                 _LOGGER.warning("Failed to renew token: %s", err)

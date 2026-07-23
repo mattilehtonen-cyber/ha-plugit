@@ -14,7 +14,7 @@ An unofficial Home Assistant custom component for Plugit EV charging network. Al
 - Voltage per phase (L1, L2, L3)
 - Charger offered current (A)
 - Session energy (kWh)
-- Session peak power and start time
+- Session peak power, start time and fully charged time
 - Charger problem status and device firmware information
 - Charging state (ongoing / idle)
 - Monthly statistics (energy, sessions, CO2 savings, charging time)
@@ -86,8 +86,9 @@ Restart Home Assistant after copying the files.
 | Plugit Session Energy | Sensor | Current session energy (kWh) |
 | Plugit Session Peak Power | Sensor | Highest power reported for the session (W) |
 | Plugit Session Start | Sensor | Current session start time |
+| Plugit Fully Charged | Sensor | Time when the vehicle reported a full battery |
 | Plugit Charger Problems | Sensor | Charger-reported problem status |
-| Plugit State | Sensor | Charging state (ongoing/idle) |
+| Plugit State | Sensor | Charging state (ongoing/fully_charged/idle) |
 | Plugit Charger Status | Sensor | OCPP status via WebSocket |
 | Plugit Monthly Energy | Sensor | Energy this month (kWh) |
 | Plugit Monthly Sessions | Sensor | Charging sessions this month |
@@ -144,7 +145,7 @@ This integration uses the Plugit Cloud API discovered through reverse engineerin
 - Data: `app-gw.plugitcloud.com`
 - WebSocket: `socket.plugitcloud.com` (Socket.IO)
 
-Real-time sensors (power, current, voltage, offered current, session energy, session peak power and charger status) update via a WebSocket connection. The integration uses REST only to fetch the initial state, while the WebSocket is unavailable, and for monthly and yearly statistics. Statistics are refreshed once per hour. Charger manufacturer, model and firmware are updated from active charging transactions when available.
+Real-time sensors (power, current, voltage, offered current, session energy, session peak power and charger status) use a WebSocket connection when updates are available. If the socket is unavailable or silent for two minutes, the integration falls back to REST polling until real-time updates resume. Statistics are refreshed once per hour. Charger manufacturer, model and firmware are updated from active charging transactions when available.
 
 ## Known Limitations
 

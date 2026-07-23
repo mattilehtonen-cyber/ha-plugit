@@ -31,6 +31,7 @@ class PlugitWebSocket:
         charge_point_id: str,
         on_status: Callable[[str], None],
         on_transaction_update: Callable[[dict], None],
+        on_transaction_stopped: Callable[[], None] | None = None,
         on_token_expiring: Callable[[], None] | None = None,
         on_connection_change: Callable[[bool], None] | None = None,
     ) -> None:
@@ -40,9 +41,11 @@ class PlugitWebSocket:
         self._charge_point_id = charge_point_id
         self._on_status = on_status
         self._on_transaction_update = on_transaction_update
+        self._on_transaction_stopped = on_transaction_stopped
         self._on_token_expiring = on_token_expiring
         self._on_connection_change = on_connection_change
         self._ws: aiohttp.ClientWebSocketResponse | None = None
+        self._socket_id: str | None = None
         self._task: asyncio.Task | None = None
         self._running = False
         self._connected = False
@@ -72,8 +75,11 @@ class PlugitWebSocket:
         if self._task:
             self._task.cancel()
 
-    def update_token(self, new_token: str) -> None:
+    async def update_token(self, new_token: str) -> None:
+        """Renew the token and re-register the current socket channels."""
         self._access_token = new_token
+        if self._socket_id:
+            await self._register_socket(self._socket_id)
 
     async def _run(self) -> None:
         while self._running:
@@ -116,6 +122,7 @@ class PlugitWebSocket:
                 return
             handshake = json.loads(first.data[1:])
             socket_id = handshake.get("sid")
+            self._socket_id = socket_id
             _LOGGER.debug("Got socketId: %s", socket_id)
 
             # 2. Lue ja skippaa "40" (namespace connect)
@@ -142,6 +149,7 @@ class PlugitWebSocket:
                     break
 
             self._set_connected(False)
+            self._socket_id = None
 
     async def _handle_message(self, raw: str) -> None:
         # Ping → pong
@@ -178,8 +186,19 @@ class PlugitWebSocket:
 
                     elif msg_type == "StopTransaction":
                         _LOGGER.debug("StopTransaction received")
+                        if self._on_transaction_stopped:
+                            self._on_transaction_stopped()
 
-                    elif msg_type is None and "latestMeterValues" in data:
+                    elif msg_type is None and (
+                        "latestMeterValues" in data
+                        or (
+                            "state" in data
+                            and (
+                                "transactionId" in data
+                                or "chargeBoxId" in data
+                            )
+                        )
+                    ):
                         _LOGGER.debug("Transaction update received via WebSocket")
                         self._on_transaction_update(data)
 
