@@ -43,6 +43,10 @@ async def async_setup_entry(
         PlugitProblemsSensor(coordinator, entry),
         PlugitStateSensor(coordinator, entry),
         PlugitChargerStatusSensor(coordinator, entry),
+        PlugitConfiguredMaxPowerSensor(coordinator, entry),
+        PlugitLastSessionEnergySensor(coordinator, entry),
+        PlugitLastSessionDurationSensor(coordinator, entry),
+        PlugitLastSessionStartSensor(coordinator, entry),
         # Monthly stats
         PlugitMonthlyEnergySensor(coordinator, entry),
         PlugitMonthlySessionsSensor(coordinator, entry),
@@ -118,6 +122,14 @@ class PlugitBaseSensor(CoordinatorEntity, SensorEntity):
     @property
     def home_charging_settings(self) -> dict | None:
         return self.coordinator.data.get("home_charging_settings")
+
+    @property
+    def charger_info(self) -> dict | None:
+        return self.coordinator.data.get("charger_info")
+
+    @property
+    def last_completed_transaction(self) -> dict | None:
+        return self.coordinator.data.get("last_completed_transaction")
 
 
 # ---- Realtime sensors ----
@@ -383,6 +395,81 @@ class PlugitChargerStatusSensor(PlugitBaseSensor):
         if self.transaction and self.transaction.get("timestampFullyCharged"):
             return "Fully Charged"
         return self.coordinator.data.get("charger_status", "Unknown")
+
+
+class PlugitConfiguredMaxPowerSensor(PlugitBaseSensor):
+    _attr_name = "Plugit Configured Max Power"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_icon = "mdi:ev-station"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry, "configured_max_power")
+
+    @property
+    def native_value(self):
+        if self.charger_info:
+            return self.charger_info.get("power")
+        return None
+
+
+class PlugitLastSessionEnergySensor(PlugitBaseSensor):
+    _attr_name = "Plugit Last Session Energy"
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry, "last_session_energy")
+
+    @property
+    def native_value(self):
+        if self.last_completed_transaction:
+            try:
+                return round(float(self.last_completed_transaction.get("energy", 0)) / 1000, 3)
+            except (TypeError, ValueError):
+                return None
+        return None
+
+
+class PlugitLastSessionDurationSensor(PlugitBaseSensor):
+    _attr_name = "Plugit Last Session Duration"
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_native_unit_of_measurement = "s"
+    _attr_icon = "mdi:timer-outline"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry, "last_session_duration")
+
+    @property
+    def native_value(self):
+        if self.last_completed_transaction:
+            try:
+                return int(float(self.last_completed_transaction.get("duration", 0)))
+            except (TypeError, ValueError):
+                return None
+        return None
+
+
+class PlugitLastSessionStartSensor(PlugitBaseSensor):
+    _attr_name = "Plugit Last Session Start"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:history"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry, "last_session_start")
+
+    @property
+    def native_value(self):
+        if not self.last_completed_transaction:
+            return None
+        timestamp = self.last_completed_transaction.get("timestampStart")
+        if not timestamp:
+            return None
+        try:
+            return datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except ValueError:
+            return None
 
 
 # ---- Monthly stats sensors ----

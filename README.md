@@ -89,7 +89,12 @@ Restart Home Assistant after copying the files.
 | Plugit Fully Charged | Sensor | Time when the vehicle reported a full battery |
 | Plugit Charger Problems | Sensor | Charger-reported problem status |
 | Plugit State | Sensor | Charging state (ongoing/fully_charged/idle) |
-| Plugit Charger Status | Sensor | OCPP status via WebSocket |
+| Plugit Charger Status | Sensor | OCPP connector status (Available/Preparing/Charging/Finishing etc.) |
+| Plugit Charger Online | Binary sensor | Charger cloud connection |
+| Plugit Configured Max Power | Sensor | Maximum power reported by Plugit Cloud (W) |
+| Plugit Last Session Energy | Sensor | Energy of the most recently completed session (kWh) |
+| Plugit Last Session Duration | Sensor | Duration of the most recently completed session |
+| Plugit Last Session Start | Sensor | Start time of the most recently completed session |
 | Plugit Monthly Energy | Sensor | Energy this month (kWh) |
 | Plugit Monthly Sessions | Sensor | Charging sessions this month |
 | Plugit Monthly CO2 Savings | Sensor | CO2 savings this month (kg) |
@@ -146,6 +151,8 @@ This integration uses the Plugit Cloud API discovered through reverse engineerin
 - WebSocket: `socket.plugitcloud.com` (Socket.IO)
 
 Real-time sensors (power, current, voltage, offered current, session energy, session peak power and charger status) use a WebSocket connection when updates are available. If the socket is unavailable or silent for two minutes, the integration falls back to REST polling until real-time updates resume. Statistics are refreshed once per hour. Charger manufacturer, model and firmware are updated from active charging transactions when available.
+
+The integration also shows the charger cloud connection, cloud-reported connector status and configured maximum power. The most recent completed session's energy, duration and start time are refreshed once per hour.
 
 ## Known Limitations
 

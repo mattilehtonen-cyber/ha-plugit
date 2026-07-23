@@ -1,7 +1,7 @@
 """Constants for Plugit integration."""
 
 DOMAIN = "plugit"
-PLATFORMS = ["sensor", "switch"]
+PLATFORMS = ["sensor", "binary_sensor", "switch"]
 
 ORY_BASE = "https://ory.plugitcloud.com"
 API_BASE = "https://app-gw.plugitcloud.com"

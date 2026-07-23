@@ -81,6 +81,26 @@ class PlugitApi:
             return data[0]
         return None
 
+    async def get_charge_box_status(
+        self, charge_point_id: str, charge_box_id: str
+    ) -> dict | None:
+        """Get the current cloud-reported status of one charger connector."""
+        if not self._access_token:
+            await self.authenticate()
+        data = await self._get(f"{API_BASE}/charge-points/{charge_point_id}/charge-boxes")
+        if not isinstance(data, list):
+            return None
+        return next(
+            (box for box in data if str(box.get("_id")) == str(charge_box_id)), None
+        )
+
+    async def get_recent_transactions(self) -> list:
+        """Get recently completed charging transactions."""
+        if not self._access_token:
+            await self.authenticate()
+        data = await self._get(f"{API_BASE}/v2/transactions/recent")
+        return data if isinstance(data, list) else []
+
     async def get_monthly_stats(self) -> dict | None:
         """Get current month statistics."""
         if not self._access_token:

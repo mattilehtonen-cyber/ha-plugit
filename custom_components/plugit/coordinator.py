@@ -52,6 +52,8 @@ class PlugitCoordinator(DataUpdateCoordinator):
         self._yearly_stats: list = []
         self._leasing_refunds: list = []
         self._home_charging_settings: dict | None = None
+        self._charger_info: dict | None = None
+        self._last_completed_transaction: dict | None = None
         self._last_stats_update: datetime | None = None
         self._initial_rest_update_done = False
 
@@ -90,8 +92,12 @@ class PlugitCoordinator(DataUpdateCoordinator):
             if use_rest:
                 rest_transaction = await self.api.get_active_transaction()
                 self._rest_transaction = rest_transaction
+                self._charger_info = await self.api.get_charge_box_status(
+                    self.entry.data[CONF_CHARGE_POINT_ID],
+                    self.entry.data[CONF_CHARGE_BOX_ID],
+                )
                 self._initial_rest_update_done = True
-                self._update_status_from_transaction(rest_transaction)
+                self._update_status_from_sources(rest_transaction)
 
             # The initial REST request authenticates the client. Start the
             # WebSocket immediately afterwards instead of waiting for the
@@ -126,6 +132,8 @@ class PlugitCoordinator(DataUpdateCoordinator):
                 "yearly_stats": self._yearly_stats,
                 "leasing_refunds": self._leasing_refunds,
                 "home_charging_settings": self._home_charging_settings,
+                "charger_info": self._charger_info,
+                "last_completed_transaction": self._last_completed_transaction,
                 "ws_active": self._ws_transaction is not None,
                 "session_peak_power": self._session_peak_power if transaction else None,
             }
@@ -141,6 +149,17 @@ class PlugitCoordinator(DataUpdateCoordinator):
             self._yearly_stats = await self.api.get_yearly_stats()
             self._leasing_refunds = await self.api.get_leasing_refunds()
             self._home_charging_settings = await self.api.get_home_charging_settings()
+            recent_transactions = await self.api.get_recent_transactions()
+            charge_box_id = str(self.entry.data[CONF_CHARGE_BOX_ID])
+            self._last_completed_transaction = next(
+                (
+                    transaction
+                    for transaction in recent_transactions
+                    if str(transaction.get("chargeBoxId")) == charge_box_id
+                    and transaction.get("state") == "finished"
+                ),
+                None,
+            )
             self._last_stats_update = datetime.now()
         except Exception as err:
             _LOGGER.warning("Failed to update stats: %s", err)
@@ -197,13 +216,16 @@ class PlugitCoordinator(DataUpdateCoordinator):
         self._last_ws_transaction_update = None
         self.hass.async_create_task(self.async_request_refresh())
 
-    def _update_status_from_transaction(self, transaction: dict | None) -> None:
-        """Derive a useful status when the server does not push one via WebSocket."""
+    def _update_status_from_sources(self, transaction: dict | None) -> None:
+        """Use the connector status, then enrich it with transaction information."""
+        if self._charger_info and self._charger_info.get("status"):
+            self._charger_status = self._charger_info["status"]
         if not transaction:
+            self._update_poll_interval()
             return
         if transaction.get("timestampFullyCharged"):
             self._charger_status = "Fully Charged"
-        elif transaction.get("state") == "ongoing":
+        elif transaction.get("state") == "ongoing" and self._charger_status == "Unknown":
             self._charger_status = "Charging"
         self._update_poll_interval()
 
