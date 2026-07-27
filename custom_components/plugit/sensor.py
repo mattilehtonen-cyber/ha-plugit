@@ -330,9 +330,8 @@ class PlugitFullyChargedSensor(PlugitBaseSensor):
 
     @property
     def native_value(self):
-        if not self.transaction or not (
-            timestamp := self.transaction.get("timestampFullyCharged")
-        ):
+        timestamp = self.coordinator.data.get("fully_charged_at")
+        if not timestamp:
             return None
         try:
             return datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
@@ -368,9 +367,9 @@ class PlugitStateSensor(PlugitBaseSensor):
 
     @property
     def native_value(self):
+        if self.coordinator.data.get("fully_charged"):
+            return "fully_charged"
         if self.transaction:
-            if self.transaction.get("timestampFullyCharged"):
-                return "fully_charged"
             return self.transaction.get("state")
         return "idle"
 
@@ -380,7 +379,7 @@ class PlugitStateSensor(PlugitBaseSensor):
             return None
         return {
             "raw_transaction_state": self.transaction.get("state"),
-            "fully_charged_at": self.transaction.get("timestampFullyCharged"),
+            "fully_charged_at": self.coordinator.data.get("fully_charged_at"),
         }
 
 
@@ -392,8 +391,6 @@ class PlugitChargerStatusSensor(PlugitBaseSensor):
 
     @property
     def native_value(self):
-        if self.transaction and self.transaction.get("timestampFullyCharged"):
-            return "Fully Charged"
         return self.coordinator.data.get("charger_status", "Unknown")
 
 

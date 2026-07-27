@@ -40,12 +40,13 @@ class PlugitChargingSwitch(CoordinatorEntity, SwitchEntity):
         unplugged. The switch represents active charging, not merely the
         existence of a transaction.
         """
-        transaction = self.coordinator.data.get("transaction")
+        data = self.coordinator.data
+        transaction = data.get("transaction")
         return bool(
             transaction
             and transaction.get("state") == "ongoing"
-            and not transaction.get("timestampFullyCharged")
-            and self.coordinator.data.get("charger_status") == "Charging"
+            and not data.get("fully_charged")
+            and data.get("charger_status") == "Charging"
         )
 
     async def async_turn_on(self, **kwargs) -> None:

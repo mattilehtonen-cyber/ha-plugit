@@ -72,12 +72,21 @@ class PlugitApi:
         """Get user chargers."""
         return await self._get(f"{API_BASE}/charge-points/user-charge-points")
 
-    async def get_active_transaction(self) -> dict | None:
+    async def get_active_transaction(self, charge_box_id: str | None = None) -> dict | None:
         """Get active charging transaction."""
         if not self._access_token:
             await self.authenticate()
         data = await self._get(f"{API_BASE}/transactions/active")
         if isinstance(data, list) and len(data) > 0:
+            if charge_box_id is not None:
+                return next(
+                    (
+                        transaction
+                        for transaction in data
+                        if str(transaction.get("chargeBoxId")) == str(charge_box_id)
+                    ),
+                    None,
+                )
             return data[0]
         return None
 

@@ -63,6 +63,14 @@ class PlugitWebSocket:
         if self._on_connection_change:
             self._on_connection_change(connected)
 
+    def _is_selected_charge_box(self, data: dict) -> bool:
+        """Return whether an event belongs to the configured connector."""
+        charge_box_id = data.get("chargeBoxId")
+        if charge_box_id is None:
+            _LOGGER.debug("Ignoring Plugit event without chargeBoxId")
+            return False
+        return str(charge_box_id) == str(self._charge_box_id)
+
     async def start(self) -> None:
         self._running = True
         self._task = asyncio.create_task(self._run())
@@ -171,6 +179,8 @@ class PlugitWebSocket:
                     msg_type = data.get("messageType")
 
                     if msg_type == "StatusNotification":
+                        if not self._is_selected_charge_box(data):
+                            return
                         status = data.get("data", {}).get("status", "Unknown")
                         _LOGGER.debug("Plugit status: %s", status)
                         self._on_status(status)
@@ -185,6 +195,8 @@ class PlugitWebSocket:
                         _LOGGER.debug("StartTransaction: meterStart=%s", data.get("data", {}).get("meterStart"))
 
                     elif msg_type == "StopTransaction":
+                        if not self._is_selected_charge_box(data):
+                            return
                         _LOGGER.debug("StopTransaction received")
                         if self._on_transaction_stopped:
                             self._on_transaction_stopped()
@@ -199,6 +211,8 @@ class PlugitWebSocket:
                             )
                         )
                     ):
+                        if not self._is_selected_charge_box(data):
+                            return
                         _LOGGER.debug("Transaction update received via WebSocket")
                         self._on_transaction_update(data)
 
